@@ -487,7 +487,7 @@ More
 |---|---|---|
 | Language | Kotlin 2.0 | Type safety, coroutines, modern Android |
 | UI | Jetpack Compose (Material 3) | Declarative, modern, animation support |
-| Architecture | MVVM + Clean Architecture | Testable, scalable, separation of concerns |
+| Architecture | Feature-based MVVM | Feature-first organisation; each feature owns its data/domain/ui layers |
 | DI | Hilt | First-class Android DI, less boilerplate than Koin |
 | Local DB | Room 2.6+ | Offline-first, coroutine support, migrations |
 | Remote DB | Firebase Firestore | Real-time sync, offline persistence layer |
@@ -504,19 +504,24 @@ More
 
 ### 9.2 Architecture Layers
 
+Code is organised **feature-first**. Each feature package owns its full vertical slice — data, domain, and UI — rather than scattering related code across global `data/`, `domain/`, and `presentation/` directories.
+
 ```
-┌─────────────────────────────────────────┐
-│           Presentation Layer            │
-│  Compose Screens → ViewModels → UiState │
-├─────────────────────────────────────────┤
-│             Domain Layer                │
-│      UseCases → Domain Models           │
-│   (Pure Kotlin, zero Android imports)   │
-├─────────────────────────────────────────┤
-│              Data Layer                 │
-│  Repository → Room DAO + Firestore      │
-│         SyncManager (WorkManager)       │
-└─────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│                   feature/flock/                     │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  │
+│  │    data/    │  │   domain/   │  │     ui/     │  │
+│  │ Entity, DAO │→ │ Model, Repo │→ │ Screen, VM  │  │
+│  │ RepoImpl    │  │ Interface,  │  │ UiState     │  │
+│  │             │  │ UseCases    │  │             │  │
+│  └─────────────┘  └─────────────┘  └─────────────┘  │
+└──────────────────────────────────────────────────────┘
+         ↑ repeated for every feature ↑
+
+┌──────────────────────────────────────────────────────┐
+│                       core/                          │
+│   Shared DB setup · Theme · DI modules · Workers    │
+└──────────────────────────────────────────────────────┘
 ```
 
 ### 9.3 Project Structure
@@ -525,47 +530,48 @@ More
 kukufarm/
 ├── app/
 │   ├── src/main/
-│   │   ├── data/
-│   │   │   ├── local/
-│   │   │   │   ├── db/           ← KukuFarmDatabase.kt
-│   │   │   │   ├── dao/          ← FlockDao, ProductionDao, SalesDao...
-│   │   │   │   ├── entity/       ← Room entities
-│   │   │   │   └── mapper/       ← Entity ↔ Domain mappers
-│   │   │   ├── remote/
+│   │   ├── core/
+│   │   │   ├── database/         ← KukuFarmDatabase.kt (Room setup, shared DAOs)
+│   │   │   ├── network/
 │   │   │   │   ├── firestore/    ← FirestoreService.kt
 │   │   │   │   └── daraja/       ← DarajaService.kt, DarajaApi.kt
-│   │   │   ├── repository/       ← Implementations
-│   │   │   └── sync/
-│   │   │       └── SyncWorker.kt
-│   │   ├── domain/
-│   │   │   ├── model/            ← Farm, Batch, EggLog, Sale, Feed, VetEvent
-│   │   │   ├── repository/       ← Interfaces
-│   │   │   └── usecase/
-│   │   │       ├── flock/
-│   │   │       ├── production/
-│   │   │       ├── sales/
-│   │   │       ├── finance/
-│   │   │       └── health/
-│   │   ├── presentation/
-│   │   │   ├── dashboard/
-│   │   │   ├── flock/
-│   │   │   ├── production/
-│   │   │   ├── sales/
-│   │   │   ├── finance/
-│   │   │   ├── health/
-│   │   │   ├── feed/
+│   │   │   ├── sync/
+│   │   │   │   └── SyncWorker.kt
 │   │   │   ├── workers/
+│   │   │   │   ├── DailyReminderWorker.kt
+│   │   │   │   └── AlertWorker.kt
+│   │   │   ├── ui/
+│   │   │   │   ├── theme/        ← KukuFarmTheme, Color, Type, Shape
+│   │   │   │   └── components/   ← Shared composables
+│   │   │   └── di/               ← Hilt modules
+│   │   ├── feature/
 │   │   │   ├── onboarding/
+│   │   │   │   ├── data/         ← FarmEntity, FarmDao, FarmRepositoryImpl
+│   │   │   │   ├── domain/       ← Farm model, FarmRepository interface, SetupFarmUseCase
+│   │   │   │   └── ui/           ← OnboardingScreen.kt, OnboardingViewModel.kt, OnboardingUiState
+│   │   │   ├── flock/
+│   │   │   │   ├── data/         ← FlockBatchEntity, FlockDao, MortalityEntity, FlockRepositoryImpl
+│   │   │   │   ├── domain/       ← FlockBatch, MortalityLog models, FlockRepository, usecases
+│   │   │   │   └── ui/           ← FlockScreen, FlockViewModel, BatchDetailScreen
+│   │   │   ├── production/
+│   │   │   │   ├── data/
+│   │   │   │   ├── domain/       ← DailyProductionLog, ProductionRepository, usecases
+│   │   │   │   └── ui/           ← ProductionScreen, ProductionViewModel
+│   │   │   ├── dashboard/
+│   │   │   │   ├── domain/       ← Aggregation usecases (reads across feature repos)
+│   │   │   │   └── ui/           ← DashboardScreen, DashboardViewModel
+│   │   │   ├── sales/
+│   │   │   │   ├── data/
+│   │   │   │   ├── domain/       ← Sale, SaleRepository, usecases, DarajaUseCase
+│   │   │   │   └── ui/
+│   │   │   ├── finance/
+│   │   │   │   ├── domain/       ← P&L aggregation usecases
+│   │   │   │   └── ui/           ← FinanceDashboardScreen, FinanceViewModel
+│   │   │   ├── feed/
+│   │   │   ├── health/           ← VaccinationEvent, HealthEvent, MedicationLog
+│   │   │   ├── team/             ← Role-based access, worker invitation
 │   │   │   └── settings/
-│   │   ├── workers/
-│   │   │   ├── DailyReminderWorker.kt
-│   │   │   ├── SyncWorker.kt
-│   │   │   └── AlertWorker.kt
-│   │   ├── ui/
-│   │   │   ├── theme/            ← KukuFarmTheme, Color, Type, Shape
-│   │   │   └── components/       ← Shared composables
-│   │   └── di/                   ← Hilt modules
-├── build-logic/                  ← Convention plugins
+│   │   └── navigation/           ← Top-level NavGraph, route destinations
 └── gradle/
     └── libs.versions.toml        ← Version catalog
 ```
@@ -763,7 +769,7 @@ data class MortalityLog(
 ### Phase 1 — Core Loop *(Target: 6 weeks)*
 > Goal: A farmer can add a flock, log daily production, and see a live dashboard.
 
-- [ ] Project scaffolding (MVVM + Clean Architecture + Hilt + Room)
+- [ ] Project scaffolding (Feature-based MVVM + Hilt + Room)
 - [ ] KukuFarm design system (theme, typography, colour tokens, shared components)
 - [ ] Onboarding flow (Farm Setup + first batch creation)
 - [ ] Flock Register (CRUD + mortality logging)
